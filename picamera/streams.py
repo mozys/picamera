@@ -734,7 +734,7 @@ class PiCameraCircularIO(CircularIO):
             self.seek(0)
             self.truncate()
 
-    def _find(self, field, criteria, first_frame):
+    def _find(self, field, criteria, first_frame, match=False):
         first = last = None
         attr = attrgetter(field)
         for frame in reversed(self._frames):
@@ -742,10 +742,17 @@ class PiCameraCircularIO(CircularIO):
                 last = frame
             if first_frame in (None, frame.frame_type):
                 first = frame
-            if last is not None and attr(last) - attr(frame) >= criteria:
+            if not match and last is not None and attr(last) - attr(frame) >= criteria:
                 break
-                if last is not None and attr(last) - attr(frame) >= criteria:
+            if None not in (last, first) and attr(last) - attr(first) >= criteria:
+                break
+
+        if match and attr(last) - attr(first) > criteria:
+            # Move last to shorten range while criteria is still met
+            for frame in reversed(self._frames):
+                if attr(frame) - attr(first) < criteria:
                     break
+                last = frame
         return first, last
 
     def _find_all(self, first_frame):
@@ -762,7 +769,7 @@ class PiCameraCircularIO(CircularIO):
 
     def copy_to(
             self, output, size=None, seconds=None, frames=None,
-            first_frame=PiVideoFrameType.sps_header):
+            first_frame=PiVideoFrameType.sps_header, match=False):
         """
         copy_to(output, size=None, seconds=None, frames=None, first_frame=PiVideoFrameType.sps_header)
 
@@ -784,6 +791,10 @@ class PiCameraCircularIO(CircularIO):
         frame in an H264 stream. If *first_frame* is ``None``, not such limit
         will be applied.
 
+        If *match* is true and *size*, *seconds* or *frames* is specified then
+        the copy will be limited to the whole number of frames that matches or
+        exceeds the given criteria by less than one frame.
+
         .. warning::
 
             Note that if a frame of the specified type (e.g. SPS header) cannot
@@ -804,12 +815,12 @@ class PiCameraCircularIO(CircularIO):
         try:
             with self.lock:
                 if size is not None:
-                    first, last = self._find('video_size', size, first_frame)
+                    first, last = self._find('video_size', size, first_frame, match)
                 elif seconds is not None:
                     seconds = int(seconds * 1000000)
-                    first, last = self._find('timestamp', seconds, first_frame)
+                    first, last = self._find('timestamp', seconds, first_frame, match)
                 elif frames is not None:
-                    first, last = self._find('index', frames, first_frame)
+                    first, last = self._find('index', frames, first_frame, match)
                 else:
                     first, last = self._find_all(first_frame)
                 # Copy chunk references into a holding buffer; this allows us
