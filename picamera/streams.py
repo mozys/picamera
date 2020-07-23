@@ -731,23 +731,23 @@ class PiCameraCircularIO(CircularIO):
         encoder = self.camera._encoders[self.splitter_port]
         try:
             if not isinstance(encoder.frame, PiVideoFrame):
-                logging.warning(f'frame is no PiVideoFrame: {encoder.frame}')
+                logger.warning(f'frame is no PiVideoFrame: {encoder.frame}')
             if not encoder.frame.frame_type in (0, 1, 2):
-                logging.warning(f'unknown frame_type {encoder.frame.frame_type}')
+                logger.warning(f'unknown frame_type {encoder.frame.frame_type}')
             if not 27 <= encoder.frame.frame_size <= 100000:
-                logging.warning(f'strange frame_size {encoder.frame.frame_size}')
+                logger.warning(f'strange frame_size {encoder.frame.frame_size}')
             if encoder.frame.index - self._f_index != 1:
                 logger.warning(f'strange index diff: old {self._f_index}, new {encoder.frame.index}')
             if self._f_video_size + encoder.frame.frame_size != encoder.frame.video_size:
-                logging.warning(f'strange video_size, expected {self._f_video_size + encoder.frame.frame_size}, got {encoder.frame.video_size}')
+                logger.warning(f'strange video_size, expected {self._f_video_size + encoder.frame.frame_size}, got {encoder.frame.video_size}')
             if encoder.frame.timestamp - self._f_timestamp > 42000:
-                logging.warning(f'strange timestamp diff: {encoder.frame.timestamp - self._f_timestamp}')
+                logger.warning(f'strange timestamp diff: {encoder.frame.timestamp - self._f_timestamp}')
 
             self._f_index = encoder.frame.index
             self._f_video_size = encoder.frame.video_size
             self._f_timestamp = encoder.frame.timestamp
         except Exception as e:
-            logging.warning(f'exception while checking frame: {e}')
+            logger.warning(f'exception while checking frame: {e}')
         
         return encoder.frame if encoder.frame.complete else None
 
