@@ -47,6 +47,8 @@ from weakref import ref
 from picamera.exc import PiCameraValueError
 from picamera.frames import PiVideoFrame, PiVideoFrameType
 
+import logging
+logger = logging.getLogger('ipcam.picamera')
 
 class BufferIO(io.IOBase):
     """
@@ -550,17 +552,26 @@ class PiCameraDequeHack(deque):
     def __init__(self, stream):
         super(PiCameraDequeHack, self).__init__()
         self.stream = ref(stream)  # avoid a circular ref
+        self.length = 0
+        self.count = 0
 
     def append(self, item):
         # Include the frame's metadata.
         frame = self.stream()._get_frame()
+        self.count += 1
+        self.length += len(item)
+        if self.length > (17000000 / 8 * 120 + 1000000):
+            logger.warning(f'count {self.count}, length {self.length}')
         return super(PiCameraDequeHack, self).append((item, frame))
 
     def pop(self):
         return super(PiCameraDequeHack, self).pop()[0]
 
     def popleft(self):
-        return super(PiCameraDequeHack, self).popleft()[0]
+        x = super(PiCameraDequeHack, self).popleft()[0]
+        self.count -= 1
+        self.length -= len(x)
+        return x
 
     def __getitem__(self, index):
         return super(PiCameraDequeHack, self).__getitem__(index)[0]
@@ -705,11 +716,39 @@ class PiCameraCircularIO(CircularIO):
         self._data = PiCameraDequeHack(self)
         self._frames = PiCameraDequeFrames(self)
 
+        self._f_index = 0
+        self._f_video_size = 0
+        self._f_timestamp = 0
+
     def _get_frame(self):
         """
         Return frame metadata from latest frame, when it is complete.
         """
+        #Jul 22 21:03:36 ipcam waitress-serve[2380]: INFO:root:PiVideoFrame(index=5235, frame_type=0, frame_size=2907, video_size=16062955, split_size=16062955, timestamp=214526647, complete=True)
+        #Jul 22 21:03:36 ipcam waitress-serve[2380]: INFO:root:PiVideoFrame(index=5236, frame_type=0, frame_size=2957, video_size=16065912, split_size=16065912, timestamp=214568310, complete=True)
+
+        
         encoder = self.camera._encoders[self.splitter_port]
+        try:
+            if not isinstance(encoder.frame, PiVideoFrame):
+                logging.warning(f'frame is no PiVideoFrame: {encoder.frame}')
+            if not encoder.frame.frame_type in (0, 1, 2):
+                logging.warning(f'unknown frame_type {encoder.frame.frame_type}')
+            if not 27 <= encoder.frame.frame_size <= 100000:
+                logging.warning(f'strange frame_size {encoder.frame.frame_size}')
+            if encoder.frame.index - self._f_index != 1:
+                logger.warning(f'strange index diff: old {self._f_index}, new {encoder.frame.index}')
+            if self._f_video_size + encoder.frame.frame_size != encoder.frame.video_size:
+                logging.warning(f'strange video_size, expected {self._f_video_size + encoder.frame.frame_size}, got {encoder.frame.video_size}')
+            if encoder.frame.timestamp - self._f_timestamp > 42000:
+                logging.warning(f'strange timestamp diff: {encoder.frame.timestamp - self._f_timestamp}')
+
+            self._f_index = encoder.frame.index
+            self._f_video_size = encoder.frame.video_size
+            self._f_timestamp = encoder.frame.timestamp
+        except Exception as e:
+            logging.warning(f'exception while checking frame: {e}')
+        
         return encoder.frame if encoder.frame.complete else None
 
     @property
