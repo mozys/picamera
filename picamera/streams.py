@@ -550,17 +550,26 @@ class PiCameraDequeHack(deque):
     def __init__(self, stream):
         super(PiCameraDequeHack, self).__init__()
         self.stream = ref(stream)  # avoid a circular ref
+        self.frame_count = 0
 
     def append(self, item):
         # Include the frame's metadata.
         frame = self.stream()._get_frame()
+        if frame is not None:
+            self.frame_count += 1
         return super(PiCameraDequeHack, self).append((item, frame))
 
     def pop(self):
-        return super(PiCameraDequeHack, self).pop()[0]
+        chunk = super(PiCameraDequeHack, self).pop()
+        if(chunk[1] is not None):
+            self.frame_count -= 1
+        return chunk[0]
 
     def popleft(self):
-        return super(PiCameraDequeHack, self).popleft()[0]
+        chunk = super(PiCameraDequeHack, self).popleft()
+        if(chunk[1] is not None):
+            self.frame_count -= 1
+        return chunk[0]
 
     def __getitem__(self, index):
         return super(PiCameraDequeHack, self).__getitem__(index)[0]
@@ -661,6 +670,9 @@ class PiCameraCircularIO(CircularIO):
     recording by :class:`PiCamera`).  You cannot specify both *size* and
     *seconds*.
 
+    The optional *max_frames* parameter specifies a frame limit for the
+    circular buffer.
+
     The *splitter_port* parameter specifies the port of the built-in splitter
     that the video encoder will be attached to. This defaults to ``1`` and most
     users will have no need to specify anything different. If you do specify
@@ -687,7 +699,7 @@ class PiCameraCircularIO(CircularIO):
         in the stream in order to determine an appropriate range to extract.
     """
     def __init__(
-            self, camera, size=None, seconds=None, bitrate=17000000,
+            self, camera, size=None, seconds=None, max_frames=None, bitrate=17000000,
             splitter_port=1):
         if size is None and seconds is None:
             raise PiCameraValueError('You must specify either size, or seconds')
@@ -701,9 +713,22 @@ class PiCameraCircularIO(CircularIO):
         except AttributeError:
             raise PiCameraValueError('camera must be a valid PiCamera object')
         self.camera = camera
+        self.max_frames = max_frames
         self.splitter_port = splitter_port
         self._data = PiCameraDequeHack(self)
         self._frames = PiCameraDequeFrames(self)
+
+    def write(self, b):
+        res = super(PiCameraCircularIO, self).write(b)
+
+        if self.max_frames is not None:
+            while self._data.frame_count > self.max_frames:
+                chunk = self._data.popleft()
+                self._length -= len(chunk)
+                self._pos -= len(chunk)
+                self._pos_index -= 1
+
+        return res
 
     def _get_frame(self):
         """
