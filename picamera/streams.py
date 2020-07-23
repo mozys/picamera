@@ -732,6 +732,8 @@ class PiCameraCircularIO(CircularIO):
         try:
             if not isinstance(encoder.frame, PiVideoFrame):
                 logger.warning(f'frame is no PiVideoFrame: {encoder.frame}')
+            if not encoder.frame.complete:
+                logger.warning(f'frame incomplete')
             if not encoder.frame.frame_type in (0, 1, 2):
                 logger.warning(f'unknown frame_type {encoder.frame.frame_type}')
             if not 27 <= encoder.frame.frame_size <= 100000:
